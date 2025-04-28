@@ -1,0 +1,5 @@
+{
+  "BotConfig": {
+    "Token": "" // Заполняется через Secret Manager
+  }
+}

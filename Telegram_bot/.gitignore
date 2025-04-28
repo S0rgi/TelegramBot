@@ -1,0 +1,57 @@
+# Игнорировать файлы сборки и отладки
+**/[Bb]in/
+**/[Oo]bj/
+**/[Dd]ebug/
+**/[Rr]elease/
+**/[Pp]ublish/
+*.exe
+*.dll
+*.pdb
+*.cache
+*.config
+
+# Файлы пользовательских настроек Visual Studio
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Папка настроек IDE
+.vs/
+.vscode/
+
+# Файлы NuGet
+**/packages/
+*.nupkg
+NuGet.exe
+.nuget/
+
+# Резервные файлы и временные файлы
+*.bak
+*.tmp
+*.log
+*.tlog
+
+# Файлы ReSharper
+*.ReSharper
+*.ReSharper*
+
+# Файлы Rider
+.idea/
+
+# Файлы Docker
+docker-compose.*
+**/.dockerignore
+**/Dockerfile
+
+# Файлы окружения и секретов (например, токен бота)
+.env
+*.secrets
+appsettings.Development.json
+
+# Файлы тестовых прогонов
+TestResults/
+
+# Исключения для специфичных файлов проекта
+!**/.config/
+!**/appsettings.json  # Разрешаем основной конфиг (без секретов)
