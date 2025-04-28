@@ -66,7 +66,7 @@ namespace TelegramMenuBot.Bot
                 try
                 {
                     string topicEncoded = Uri.EscapeDataString(message.Text);
-                    string requestUrl = $"https://localhost:7184/api/v1/Education/{topicEncoded}";
+                    string requestUrl = $"http://localhost:5135/api/v1/Education/{topicEncoded}";
 
                     using var httpClient = new HttpClient();
                     var response = await httpClient.GetAsync(requestUrl);
@@ -78,29 +78,36 @@ namespace TelegramMenuBot.Bot
                             PropertyNameCaseInsensitive = true
                         };
                         var responseString = await response.Content.ReadAsStringAsync();
-                        var educationResponse = JsonSerializer.Deserialize<EducationResponse>(responseString, options);
+                        var educationResponses = JsonSerializer.Deserialize<List<EducationResponse>>(responseString, options);
 
-                        if ( educationResponse == null || string.IsNullOrEmpty(educationResponse.EducationLink) )
+                        if ( educationResponses == null || educationResponses.Count == 0 )
                         {
-                            await botClient.SendMessage(chatId, "⚠️ Ссылка на материал не найдена.", replyMarkup: BotReplyKeyboards.GetMainMenu());
+                            await botClient.SendMessage(chatId, "⚠️ Ссылки на материалы не найдены.", replyMarkup: BotReplyKeyboards.GetMainMenu());
                             return;
                         }
 
-                        string link = educationResponse.EducationLink;
-
-                        string infoMessage = $"ℹ️ Информация по теме *{message.Text}*:\n\n" +
-                                             $"[Перейти к материалу]({link})";
-
-                        var keyboard = new ReplyKeyboardMarkup(new[]
+                        foreach ( var education in educationResponses )
                         {
-                new[] { new KeyboardButton($"▶️ Пройти тест по теме \"{message.Text}\"") }
-            })
-                        {
-                            ResizeKeyboard = true,
-                            OneTimeKeyboard = true
-                        };
+                            if ( string.IsNullOrEmpty(education.EducationLink) )
+                                continue;
 
-                        await botClient.SendMessage(chatId, infoMessage, parseMode: ParseMode.Markdown, replyMarkup: keyboard);
+                            string link = education.EducationLink;
+
+                            string infoMessage = $"ℹ️ Информация по теме для подготовки:\n\n" +
+                                                 $"[Перейти к материалу]({link})";
+
+                            var keyboard = new ReplyKeyboardMarkup(new[]
+                            {
+        new[] { new KeyboardButton($"▶️ Пройти тест по теме \"{education.Theme}\"") },
+        new[] { new KeyboardButton($"/menu") }
+    })
+                            {
+                                ResizeKeyboard = true,
+                                OneTimeKeyboard = true
+                            };
+
+                            await botClient.SendMessage(chatId, infoMessage, parseMode: ParseMode.Markdown, replyMarkup: keyboard);
+                        }
                     }
                     else
                     {
@@ -206,7 +213,7 @@ namespace TelegramMenuBot.Bot
                 {
                     string topicEncoded = Uri.EscapeDataString(session.TopicTitle);
 
-                    string requestUrl = $"https://localhost:7184/api/v1/User/{chatId},{topicEncoded}";
+                    string requestUrl = $"http://localhost:5135/api/v1/User/{chatId},{topicEncoded}";
 
                     using var httpClient = new HttpClient();
                     var request = new HttpRequestMessage(HttpMethod.Patch, requestUrl);
