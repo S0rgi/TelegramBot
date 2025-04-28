@@ -69,7 +69,8 @@ namespace TelegramMenuBot.Bot
                     {
                         Questions = questions,
                         CurrentQuestionIndex = 0,
-                        CorrectAnswersCount = 0
+                        CorrectAnswersCount = 0,
+                        TopicTitle = message.Text // Сохраняем название темы
                     };
 
                     UserTestSessions[chatId] = testSession;
@@ -108,14 +109,13 @@ namespace TelegramMenuBot.Bot
             }
 
             session.CurrentQuestionIndex++;
-
             if ( session.CurrentQuestionIndex < session.Questions.Count )
             {
                 await SendCurrentQuestion(botClient, chatId, session);
             }
             else
             {
-                await FinishTestAsync(botClient, chatId, session);
+                await FinishTestAsync(botClient, chatId, session    );
             }
         }
 
@@ -126,13 +126,51 @@ namespace TelegramMenuBot.Bot
             double percentCorrect = (double)correctAnswers / totalQuestions * 100;
 
             UserTestSessions.TryRemove(chatId, out _); // Завершили тест
+            if ( string.IsNullOrEmpty(session.TopicTitle) )
+            {
+                Console.WriteLine("❌ Ошибка: не найдено название темы в сессии");
+                await botClient.SendMessage(chatId, "⚠️ Произошла ошибка при обработке теста");
+                return;
+            }
+            if ( percentCorrect > 66 )
+            {
+                try
+                {
+                    string topicEncoded = Uri.EscapeDataString(session.TopicTitle);
+
+                    string requestUrl = $"https://localhost:7184/api/v1/User/{chatId},{topicEncoded}";
+
+                    using var httpClient = new HttpClient();
+                    var request = new HttpRequestMessage(HttpMethod.Patch, requestUrl);
+                    request.Headers.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("*/*"));
+
+                    var response = await httpClient.SendAsync(request);
+
+                    if ( response.IsSuccessStatusCode )
+                    {
+                        Console.WriteLine("✅ Прогресс успешно обновлен.");
+                    }
+                    else
+                    {
+                        Console.WriteLine($"⚠️ Ошибка обновления прогресса: {response.StatusCode}");
+                    }
+                }
+                catch ( Exception ex )
+                {
+                    Console.WriteLine($"❌ Ошибка при отправке запроса на обновление прогресса: {ex.Message}");
+                }
+            }
 
             string resultMessage = $"🏁 *Тест завершен!*\n\n" +
                                    $"*Правильных ответов:* {correctAnswers} из {totalQuestions}\n" +
-                                   $"*Процент правильных ответов:* {percentCorrect:F1}%";
-
+                                   $"*Процент правильных ответов:* {percentCorrect:F1}%\n";
+            if ( percentCorrect > 66 )
+                resultMessage += "Тема сдана!";
+            else
+                resultMessage += "Тема не сдана.";
             await botClient.SendMessage(chatId, resultMessage, parseMode: ParseMode.Markdown, replyMarkup: BotReplyKeyboards.GetMainMenu());
         }
+
 
         private static async Task HandleRegistrationAsync(ITelegramBotClient botClient, Message message, long chatId)
         {

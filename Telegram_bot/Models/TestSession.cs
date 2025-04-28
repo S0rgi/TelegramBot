@@ -12,6 +12,7 @@ namespace Telegram_bot.Models
         public List<QuestionModel> Questions { get; set; }
         public int CurrentQuestionIndex { get; set; }
         public int CorrectAnswersCount { get; set; }
+        public string TopicTitle { get; internal set; }
     }
 
 }
