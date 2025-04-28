@@ -7,6 +7,7 @@ using TelegramMenuBot.Utilities;
 using Telegram_bot.Models;
 using Telegram.Bot.Types.ReplyMarkups;
 using System.Collections.Concurrent;
+using System.Text.Json;
 
 namespace TelegramMenuBot.Bot
 {
@@ -14,6 +15,7 @@ namespace TelegramMenuBot.Bot
     {
         private static ConcurrentDictionary<long, TestSession> UserTestSessions = new();
         private static readonly string[] AnswerLetters = { "a", "b", "c", "d" };
+        private static ConcurrentDictionary<long, string> PendingTestTopics = new();
 
         public static async Task HandleUpdateAsync(ITelegramBotClient botClient, Update update, CancellationToken cancellationToken)
         {
@@ -57,29 +59,95 @@ namespace TelegramMenuBot.Bot
 
             if ( titles.Contains(message.Text) )
             {
-                var questions = await TestService.GetTopicQuestionsAsync(message.Text);
+                // Сохраняем выбранную тему для пользователя
+                PendingTestTopics[chatId] = message.Text;
 
-                if ( questions.Count == 0 )
+                // Запрашиваем ссылку на материал по теме
+                try
                 {
-                    await botClient.SendMessage(chatId, "❗ По этой теме пока нет вопросов.", replyMarkup: BotReplyKeyboards.GetMainMenu());
-                }
-                else
-                {
-                    var testSession = new TestSession
+                    string topicEncoded = Uri.EscapeDataString(message.Text);
+                    string requestUrl = $"https://localhost:7184/api/v1/Education/{topicEncoded}";
+
+                    using var httpClient = new HttpClient();
+                    var response = await httpClient.GetAsync(requestUrl);
+
+                    if ( response.IsSuccessStatusCode )
                     {
-                        Questions = questions,
-                        CurrentQuestionIndex = 0,
-                        CorrectAnswersCount = 0,
-                        TopicTitle = message.Text // Сохраняем название темы
-                    };
+                        var options = new JsonSerializerOptions
+                        {
+                            PropertyNameCaseInsensitive = true
+                        };
+                        var responseString = await response.Content.ReadAsStringAsync();
+                        var educationResponse = JsonSerializer.Deserialize<EducationResponse>(responseString, options);
 
-                    UserTestSessions[chatId] = testSession;
+                        if ( educationResponse == null || string.IsNullOrEmpty(educationResponse.EducationLink) )
+                        {
+                            await botClient.SendMessage(chatId, "⚠️ Ссылка на материал не найдена.", replyMarkup: BotReplyKeyboards.GetMainMenu());
+                            return;
+                        }
 
-                    await SendCurrentQuestion(botClient, chatId, testSession);
+                        string link = educationResponse.EducationLink;
+
+                        string infoMessage = $"ℹ️ Информация по теме *{message.Text}*:\n\n" +
+                                             $"[Перейти к материалу]({link})";
+
+                        var keyboard = new ReplyKeyboardMarkup(new[]
+                        {
+                new[] { new KeyboardButton($"▶️ Пройти тест по теме \"{message.Text}\"") }
+            })
+                        {
+                            ResizeKeyboard = true,
+                            OneTimeKeyboard = true
+                        };
+
+                        await botClient.SendMessage(chatId, infoMessage, parseMode: ParseMode.Markdown, replyMarkup: keyboard);
+                    }
+                    else
+                    {
+                        await botClient.SendMessage(chatId, "⚠️ Не удалось получить информацию по теме.", replyMarkup: BotReplyKeyboards.GetMainMenu());
+                    }
                 }
+                catch ( Exception ex )
+                {
+                    Console.WriteLine($"Ошибка при получении материала по теме: {ex.Message}");
+                    await botClient.SendMessage(chatId, "⚠️ Ошибка при загрузке материала.", replyMarkup: BotReplyKeyboards.GetMainMenu());
+                }
+
                 return;
             }
+            if (message.Text != null && message.Text.StartsWith("▶️ Пройти тест по теме"))
+{
+    if (PendingTestTopics.TryGetValue(chatId, out var topicTitle))
+    {
+        var questions = await TestService.GetTopicQuestionsAsync(topicTitle);
 
+        if (questions.Count == 0)
+        {
+            await botClient.SendMessage(chatId, "❗ По этой теме пока нет вопросов.", replyMarkup: BotReplyKeyboards.GetMainMenu());
+        }
+        else
+        {
+            var testSession = new TestSession
+            {
+                Questions = questions,
+                CurrentQuestionIndex = 0,
+                CorrectAnswersCount = 0,
+                TopicTitle = topicTitle
+            };
+
+            UserTestSessions[chatId] = testSession;
+            PendingTestTopics.TryRemove(chatId, out _); // Убираем, потому что начали тест
+
+            await SendCurrentQuestion(botClient, chatId, testSession);
+        }
+    }
+    else
+    {
+        await botClient.SendMessage(chatId, "⚠️ Тема не найдена. Пожалуйста, выберите тему снова.", replyMarkup: BotReplyKeyboards.GetMainMenu());
+    }
+
+    return;
+}
             await HandleAuthorizedUserAsync(botClient, message, chatId);
         }
 
