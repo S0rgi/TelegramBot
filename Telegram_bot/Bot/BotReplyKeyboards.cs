@@ -21,24 +21,26 @@ namespace TelegramMenuBot.Bot
             return new ReplyKeyboardMarkup(new[]
             {
                 new[] { new KeyboardButton("👤 Профиль") },
-                new[] { new KeyboardButton("💡 Темы") },
-                new[] { new KeyboardButton("🛠 Техподдержка") }
+                new[] {new KeyboardButton("💡 Начать проходить курс сейчас") },
+                new[] {new KeyboardButton("Напомнить о курсе через 12 часов") },
+                new[] { new KeyboardButton("Популярные вопросы") }
             })
             {
                 ResizeKeyboard = true
             };
         }
-
-
-        public static ReplyKeyboardMarkup GetTestKeyboard()
+        public static ReplyKeyboardMarkup GetPopularQuestions()
         {
             return new ReplyKeyboardMarkup(new[]
             {
-                new[] { new KeyboardButton("40"), new KeyboardButton("42"), new KeyboardButton("45") }
+                new[] { new KeyboardButton("Расскажи про программу курса") },
+                new[] { new KeyboardButton("Сколько по времени будет продолжительность курса?") },
+                new[] { new KeyboardButton("Останутся ли у меня материалы после прохождения курса?") },
+                new[] { new KeyboardButton("🛠 Обратиться в техподдержку.") },
+                new[] { new KeyboardButton("Вернуться в Главное меню") }
             })
             {
-                ResizeKeyboard = true,
-                OneTimeKeyboard = true
+                ResizeKeyboard = true
             };
         }
 
@@ -52,5 +54,30 @@ namespace TelegramMenuBot.Bot
                 OneTimeKeyboard = false
             };
         }
+        public static ReplyKeyboardMarkup GetPassTestButton(string topicTitle)
+        {
+            return new ReplyKeyboardMarkup(new[]
+            {
+                new[] { new KeyboardButton($"▶️ Пройти тест по теме \"{topicTitle}\"") },
+                new[] { new KeyboardButton("Вернуться в Главное меню") }
+            })
+            {
+                ResizeKeyboard = true,
+                OneTimeKeyboard = true
+            };
+        }
+        public static ReplyKeyboardMarkup GetCourseChoiceMenu()
+        {
+            return new ReplyKeyboardMarkup(new[]
+            {
+                new[] { new KeyboardButton("📚 Материалы"), new KeyboardButton("📝 Тесты") },
+                new[] { new KeyboardButton("Вернуться в Главное меню") }
+            })
+            {
+                ResizeKeyboard = true,
+                OneTimeKeyboard = true
+            };
+        }
+
     }
 }

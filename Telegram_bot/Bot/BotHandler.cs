@@ -42,7 +42,8 @@ namespace TelegramMenuBot.Bot
                 }
                 else
                 {
-                    await botClient.SendMessage(chatId, "👋 Привет! Введите своё ФИО для регистрации:");
+                    await botClient.SendMessage(chatId, "Привет! Рады приветствовать на нашей обучающей программе тимлид!");
+                    await botClient.SendMessage(chatId, "Введи свое ФИО.");
                 }
                 return;
             }
@@ -57,104 +58,63 @@ namespace TelegramMenuBot.Bot
 
             var titles = await TestService.GetTestTitlesAsync();
 
+
             if ( titles.Contains(message.Text) )
             {
-                // Сохраняем выбранную тему для пользователя
-                PendingTestTopics[chatId] = message.Text;
-
-                // Запрашиваем ссылку на материал по теме
-                try
+                if ( PendingTestTopics.TryGetValue(chatId, out var pendingType) )
                 {
-                    string topicEncoded = Uri.EscapeDataString(message.Text);
-                    string requestUrl = $"http://localhost:5135/api/v1/Education/{topicEncoded}";
-
-                    using var httpClient = new HttpClient();
-                    var response = await httpClient.GetAsync(requestUrl);
-
-                    if ( response.IsSuccessStatusCode )
+                    if ( pendingType == "materials" )
                     {
-                        var options = new JsonSerializerOptions
-                        {
-                            PropertyNameCaseInsensitive = true
-                        };
-                        var responseString = await response.Content.ReadAsStringAsync();
-                        var educationResponses = JsonSerializer.Deserialize<List<EducationResponse>>(responseString, options);
+                        await SendMaterials(botClient, chatId, message.Text);
+                    }
+                    else if ( pendingType == "tests" )
+                    {
+                        await StartTest(botClient, chatId, message.Text);
+                    }
 
-                        if ( educationResponses == null || educationResponses.Count == 0 )
-                        {
-                            await botClient.SendMessage(chatId, "⚠️ Ссылки на материалы не найдены.", replyMarkup: BotReplyKeyboards.GetMainMenu());
-                            return;
-                        }
+                    PendingTestTopics.TryRemove(chatId, out _);
+                }
+                else
+                {
+                    await botClient.SendMessage(chatId, "⚠️ Пожалуйста выберите сначала материалы или тесты.", replyMarkup: BotReplyKeyboards.GetMainMenu());
+                }
 
-                        foreach ( var education in educationResponses )
-                        {
-                            if ( string.IsNullOrEmpty(education.EducationLink) )
-                                continue;
+                return;
 
-                            string link = education.EducationLink;
+            }
+            if ( message.Text != null && message.Text.StartsWith("Перейти к выполнению теста") )
+            {
+                if ( PendingTestTopics.TryGetValue(chatId, out var topicTitle) )
+                {
+                    var questions = await TestService.GetTopicQuestionsAsync(topicTitle);
 
-                            string infoMessage = $"ℹ️ Информация по теме для подготовки:\n\n" +
-                                                 $"[Перейти к материалу]({link})";
-
-                            var keyboard = new ReplyKeyboardMarkup(new[]
-                            {
-        new[] { new KeyboardButton($"▶️ Пройти тест по теме \"{education.Theme}\"") },
-        new[] { new KeyboardButton($"/menu") }
-    })
-                            {
-                                ResizeKeyboard = true,
-                                OneTimeKeyboard = true
-                            };
-
-                            await botClient.SendMessage(chatId, infoMessage, parseMode: ParseMode.Markdown, replyMarkup: keyboard);
-                        }
+                    if ( questions.Count == 0 )
+                    {
+                        await botClient.SendMessage(chatId, "❗ По этой теме пока нет вопросов.", replyMarkup: BotReplyKeyboards.GetMainMenu());
                     }
                     else
                     {
-                        await botClient.SendMessage(chatId, "⚠️ Не удалось получить информацию по теме.", replyMarkup: BotReplyKeyboards.GetMainMenu());
+                        var testSession = new TestSession
+                        {
+                            Questions = questions,
+                            CurrentQuestionIndex = 0,
+                            CorrectAnswersCount = 0,
+                            TopicTitle = topicTitle
+                        };
+
+                        UserTestSessions[chatId] = testSession;
+                        PendingTestTopics.TryRemove(chatId, out _);
+
+                        await SendCurrentQuestion(botClient, chatId, testSession);
                     }
                 }
-                catch ( Exception ex )
+                else
                 {
-                    Console.WriteLine($"Ошибка при получении материала по теме: {ex.Message}");
-                    await botClient.SendMessage(chatId, "⚠️ Ошибка при загрузке материала.", replyMarkup: BotReplyKeyboards.GetMainMenu());
+                    await botClient.SendMessage(chatId, "⚠️ Тема не найдена. Пожалуйста, выберите тему снова.", replyMarkup: BotReplyKeyboards.GetMainMenu());
                 }
 
                 return;
             }
-            if (message.Text != null && message.Text.StartsWith("▶️ Пройти тест по теме"))
-{
-    if (PendingTestTopics.TryGetValue(chatId, out var topicTitle))
-    {
-        var questions = await TestService.GetTopicQuestionsAsync(topicTitle);
-
-        if (questions.Count == 0)
-        {
-            await botClient.SendMessage(chatId, "❗ По этой теме пока нет вопросов.", replyMarkup: BotReplyKeyboards.GetMainMenu());
-        }
-        else
-        {
-            var testSession = new TestSession
-            {
-                Questions = questions,
-                CurrentQuestionIndex = 0,
-                CorrectAnswersCount = 0,
-                TopicTitle = topicTitle
-            };
-
-            UserTestSessions[chatId] = testSession;
-            PendingTestTopics.TryRemove(chatId, out _); // Убираем, потому что начали тест
-
-            await SendCurrentQuestion(botClient, chatId, testSession);
-        }
-    }
-    else
-    {
-        await botClient.SendMessage(chatId, "⚠️ Тема не найдена. Пожалуйста, выберите тему снова.", replyMarkup: BotReplyKeyboards.GetMainMenu());
-    }
-
-    return;
-}
             await HandleAuthorizedUserAsync(botClient, message, chatId);
         }
 
@@ -176,11 +136,11 @@ namespace TelegramMenuBot.Bot
             if ( selectedLetter == correctAnswer )
             {
                 session.CorrectAnswersCount++;
-                await botClient.SendMessage(chatId, "✅ Верно!");
+                await botClient.SendMessage(chatId, "✅ Ты молодец! Это правильный ответ");
             }
             else
             {
-                await botClient.SendMessage(chatId, "❌ Неверно.");
+                await botClient.SendMessage(chatId, "К сожалению, ответ неверный. Попробуй пройти материал еще раз, у тебя все получится!");
             }
 
             session.CurrentQuestionIndex++;
@@ -190,7 +150,7 @@ namespace TelegramMenuBot.Bot
             }
             else
             {
-                await FinishTestAsync(botClient, chatId, session    );
+                await FinishTestAsync(botClient, chatId, session);
             }
         }
 
@@ -263,7 +223,7 @@ namespace TelegramMenuBot.Bot
                 try
                 {
                     await UserService.RegisterUserAsync(chatId, fullName, phoneNumber);
-                    await botClient.SendMessage(chatId, "✅ Регистрация завершена!", replyMarkup: BotReplyKeyboards.GetMainMenu());
+                    await botClient.SendMessage(chatId, "✅ Супер! Ты успешно авторизован.", replyMarkup: BotReplyKeyboards.GetMainMenu());
                 }
                 catch ( Exception ex )
                 {
@@ -276,11 +236,87 @@ namespace TelegramMenuBot.Bot
             else
             {
                 await RegistrationSessionService.SetFullNameAsync(chatId, message.Text);
-                await botClient.SendMessage(chatId, "📱 Теперь отправьте ваш номер телефона через кнопку ниже:", replyMarkup: BotReplyKeyboards.RequestPhoneKeyboard());
+                await botClient.SendMessage(chatId, "📱 Теперь нужно подтвердить твой номер телефона.", replyMarkup: BotReplyKeyboards.RequestPhoneKeyboard());
             }
         }
 
         private static async Task HandleAuthorizedUserAsync(ITelegramBotClient botClient, Message message, long chatId)
+        {
+            if ( await HandleMainMenu(botClient, message, chatId) )
+                return;
+
+            if ( await HandlePopularQuestions(botClient, message, chatId) )
+                return;
+            if ( message.Text == "📚 Материалы" )
+            {
+                var titles = await TestService.GetTestTitlesAsync();
+                if ( titles.Count == 0 )
+                {
+                    await botClient.SendMessage(chatId, "❗ Тем пока нет.", replyMarkup: BotReplyKeyboards.GetMainMenu());
+                }
+                else
+                {
+                    var keyboard = BotReplyKeyboards.GetTopicsKeyboard(titles);
+                    await botClient.SendMessage(chatId, "📚 Выберите тему для изучения материалов:", replyMarkup: keyboard);
+
+                    // Чтобы знать что человек выбрал материалы
+                    PendingTestTopics[chatId] = "materials";
+                }
+                return;
+            }
+
+            if ( message.Text == "📝 Тесты" )
+            {
+                var titles = await TestService.GetTestTitlesAsync();
+                if ( titles.Count == 0 )
+                {
+                    await botClient.SendMessage(chatId, "❗ Тем пока нет.", replyMarkup: BotReplyKeyboards.GetMainMenu());
+                }
+                else
+                {
+                    var keyboard = BotReplyKeyboards.GetTopicsKeyboard(titles);
+                    await botClient.SendMessage(chatId, "📝 Выберите тему для прохождения теста:", replyMarkup: keyboard);
+
+                    // Чтобы знать что человек выбрал тесты
+                    PendingTestTopics[chatId] = "tests";
+                }
+                return;
+            }
+
+            switch ( message.Text )
+            {
+                case "Вернуться в Главное меню":
+                    await botClient.SendMessage(chatId, "📋 Главное меню:", replyMarkup: BotReplyKeyboards.GetMainMenu());
+                    break;
+
+                default:
+                    await botClient.SendMessage(chatId, "🤔 Я не понимаю. Выберите действие:", replyMarkup: BotReplyKeyboards.GetMainMenu());
+                    break;
+            }
+        }
+
+        private static async Task<bool> HandlePopularQuestions(ITelegramBotClient botClient, Message message, long chatId)
+        {
+            switch ( message.Text )
+            {
+                case "🛠 Обратиться в техподдержку.":
+                    await botClient.SendMessage(chatId, "Свяжитесь с [@SupportUsername](https://t.me/SupportUsername)", parseMode: ParseMode.Markdown, replyMarkup: BotReplyKeyboards.GetMainMenu());
+                    return true;
+                case "Расскажи про программу курса":
+                    await botClient.SendMessage(chatId, "Это небольшой курс, о всех темах вы можете узнать, нажав в главном меню 'Начать проходить курс сейчас'.");
+                    return true;
+                case "Сколько по времени будет продолжительность курса?":
+                    await botClient.SendMessage(chatId, "Зависит от вашей скорости обучения, в среднем — 7 дней.");
+                    return true;
+                case "Останутся ли у меня материалы после прохождения курса?":
+                    await botClient.SendMessage(chatId, "Конечно, у вас останется полный доступ ко всем материалам.");
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        private static async Task<bool> HandleMainMenu(ITelegramBotClient botClient, Message message, long chatId)
         {
             switch ( message.Text )
             {
@@ -301,35 +337,36 @@ namespace TelegramMenuBot.Bot
                         Console.WriteLine($"Ошибка при получении профиля: {ex.Message}");
                         await botClient.SendMessage(chatId, "⚠️ Ошибка при получении профиля. Попробуйте позже.", replyMarkup: BotReplyKeyboards.GetMainMenu());
                     }
-                    break;
+                    return true;
 
-                case "💡 Темы":
-                    var titles = await TestService.GetTestTitlesAsync();
-                    if ( titles.Count == 0 )
+                case "Напомнить о курсе через 12 часов":
                     {
-                        await botClient.SendMessage(chatId, "❗ Тем пока нет.", replyMarkup: BotReplyKeyboards.GetMainMenu());
-                    }
-                    else
-                    {
-                        var keyboard = BotReplyKeyboards.GetTopicsKeyboard(titles);
-                        await botClient.SendMessage(chatId, "📚 Выберите тему:", replyMarkup: keyboard);
-                    }
-                    break;
+                        var reminderTime = DateTime.Now.AddHours(12);
+                        var reminderText = $"Хорошо, напомню тебе в {reminderTime:HH:mm}";
 
-                case "🛠 Техподдержка":
-                    await botClient.SendMessage(chatId, "Свяжитесь с [@SupportUsername](https://t.me/SupportUsername)", parseMode: ParseMode.Markdown, replyMarkup: BotReplyKeyboards.GetMainMenu());
-                    break;
+                        await botClient.SendMessage(chatId, reminderText);
 
-                case "/menu":
-                    await botClient.SendMessage(chatId, "📋 Главное меню:", replyMarkup: BotReplyKeyboards.GetMainMenu());
-                    break;
+                        _ = Task.Run(async () =>
+                        {
+                            await Task.Delay(TimeSpan.FromHours(12));
+                            await botClient.SendMessage(chatId, "🔔 Напоминаю о курсе! Пора вернуться к обучению.");
+                        });
+                    }
+                    return true;
+
+                case "💡 Начать проходить курс сейчас":
+                    await botClient.SendMessage(chatId, "Что хочешь выбрать?", replyMarkup: BotReplyKeyboards.GetCourseChoiceMenu());
+                    return true;
+
+
+                case "Популярные вопросы":
+                    await botClient.SendMessage(chatId, "Самые популярные вопросы:", replyMarkup: BotReplyKeyboards.GetPopularQuestions());
+                    return true;
 
                 default:
-                    await botClient.SendMessage(chatId, "🤔 Я не понимаю. Выберите действие:", replyMarkup: BotReplyKeyboards.GetMainMenu());
-                    break;
+                    return false;
             }
         }
-
         public static Task HandleErrorAsync(ITelegramBotClient botClient, Exception exception, CancellationToken cancellationToken)
         {
             Console.WriteLine($"Ошибка: {exception.Message}");
@@ -360,5 +397,76 @@ namespace TelegramMenuBot.Bot
 
             await botClient.SendMessage(chatId, questionText, parseMode: ParseMode.Markdown, replyMarkup: keyboard);
         }
+        private static async Task SendMaterials(ITelegramBotClient botClient, long chatId, string topic)
+        {
+            try
+            {
+                string topicEncoded = Uri.EscapeDataString(topic);
+                string requestUrl = $"http://localhost:5135/api/v1/Education/{topicEncoded}";
+
+                using var httpClient = new HttpClient();
+                var response = await httpClient.GetAsync(requestUrl);
+
+                if ( response.IsSuccessStatusCode )
+                {
+                    var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+                    var responseString = await response.Content.ReadAsStringAsync();
+                    var educationResponses = JsonSerializer.Deserialize<List<EducationResponse>>(responseString, options);
+
+                    if ( educationResponses == null || educationResponses.Count == 0 )
+                    {
+                        await botClient.SendMessage(chatId, "⚠️ Ссылки на материалы не найдены.", replyMarkup: BotReplyKeyboards.GetMainMenu());
+                        return;
+                    }
+
+                    foreach ( var education in educationResponses )
+                    {
+                        if ( string.IsNullOrEmpty(education.EducationLink) )
+                            continue;
+
+                        string link = education.EducationLink;
+
+                        string infoMessage = $"ℹ️ Информация по теме для подготовки:\n\n" +
+                                             $"[Перейти к материалу]({link})";
+
+                        await botClient.SendMessage(chatId, infoMessage, parseMode: ParseMode.Markdown, replyMarkup: BotReplyKeyboards.GetMainMenu());
+                    }
+                }
+                else
+                {
+                    await botClient.SendMessage(chatId, "⚠️ Не удалось получить информацию по теме.", replyMarkup: BotReplyKeyboards.GetMainMenu());
+                }
+            }
+            catch ( Exception ex )
+            {
+                Console.WriteLine($"Ошибка при получении материала по теме: {ex.Message}");
+                await botClient.SendMessage(chatId, "⚠️ Ошибка при загрузке материала.", replyMarkup: BotReplyKeyboards.GetMainMenu());
+            }
+        }
+
+        private static async Task StartTest(ITelegramBotClient botClient, long chatId, string topicTitle)
+        {
+            var questions = await TestService.GetTopicQuestionsAsync(topicTitle);
+
+            if ( questions.Count == 0 )
+            {
+                await botClient.SendMessage(chatId, "❗ По этой теме пока нет вопросов.", replyMarkup: BotReplyKeyboards.GetMainMenu());
+            }
+            else
+            {
+                var testSession = new TestSession
+                {
+                    Questions = questions,
+                    CurrentQuestionIndex = 0,
+                    CorrectAnswersCount = 0,
+                    TopicTitle = topicTitle
+                };
+
+                UserTestSessions[chatId] = testSession;
+
+                await SendCurrentQuestion(botClient, chatId, testSession);
+            }
+        }
+
     }
 }
