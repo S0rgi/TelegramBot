@@ -1,4 +1,5 @@
 ﻿using System.Net.Http.Json;
+using System.Text.Json;
 using TelegramMenuBot.Models;
 
 namespace TelegramMenuBot.Services
@@ -20,15 +21,28 @@ namespace TelegramMenuBot.Services
 
             return titles?.Select(t => t.Title).Where(title => !string.IsNullOrWhiteSpace(title)).Distinct().ToList() ?? new List<string>();
         }
-        public static async Task<List<QuestionModel>> GetQuestionsByTopicAsync(string topicTitle)
+        public static async Task<string> GetTopicDetailsAsync(string title)
         {
-            var response = await _httpClient.GetAsync($"TestTitle/{Uri.EscapeDataString(topicTitle)}");
+            var encodedTitle = Uri.EscapeDataString(title);
+            var response = await _httpClient.GetAsync($"TestTitle/{encodedTitle}");
+            response.EnsureSuccessStatusCode();
+            return await response.Content.ReadAsStringAsync();
+        }
+        public static async Task<List<QuestionModel>> GetTopicQuestionsAsync(string title)
+        {
+            var encodedTitle = Uri.EscapeDataString(title);
+            var response = await _httpClient.GetAsync($"TestTitle/{encodedTitle}");
 
             response.EnsureSuccessStatusCode();
 
-            var questions = await response.Content.ReadFromJsonAsync<List<QuestionModel>>();
+            var json = await response.Content.ReadAsStringAsync();
 
-            return questions ?? [];
+            var questions = JsonSerializer.Deserialize<List<QuestionModel>>(json, new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true
+            });
+
+            return questions ?? new List<QuestionModel>();
         }
     }
 }
