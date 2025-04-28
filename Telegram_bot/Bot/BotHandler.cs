@@ -13,6 +13,7 @@ namespace TelegramMenuBot.Bot
     public static class BotHandlers
     {
         private static ConcurrentDictionary<long, TestSession> UserTestSessions = new();
+        private static readonly string[] AnswerLetters = { "a", "b", "c", "d" };
 
         public static async Task HandleUpdateAsync(ITelegramBotClient botClient, Update update, CancellationToken cancellationToken)
         {
@@ -21,32 +22,11 @@ namespace TelegramMenuBot.Bot
 
             var message = update.Message;
             var chatId = message.Chat.Id;
-            // Проверка - пользователь в процессе теста?
+
+            // Если пользователь в процессе теста
             if ( UserTestSessions.TryGetValue(chatId, out var sessionInProgress) )
             {
-                var currentQuestion = sessionInProgress.Questions[sessionInProgress.CurrentQuestionIndex];
-
-                // Здесь можно проверить правильность ответа:
-                if ( message.Text.Trim() == currentQuestion.CorrectAnswer.Trim() )
-                {
-                    await botClient.SendMessage(chatId, "✅ Верно!");
-                }
-                else
-                {
-                    await botClient.SendMessage(chatId, $"❌ Неверно. Правильный ответ: {currentQuestion.CorrectAnswer}");
-                }
-
-                sessionInProgress.CurrentQuestionIndex++;
-
-                if ( sessionInProgress.CurrentQuestionIndex < sessionInProgress.Questions.Count )
-                {
-                    await SendCurrentQuestion(botClient, chatId, sessionInProgress);
-                }
-                else
-                {
-                    UserTestSessions.TryRemove(chatId, out _); // Завершили тест
-                    await botClient.SendMessage(chatId, "🏁 Тест завершен!", replyMarkup: BotReplyKeyboards.GetMainMenu());
-                }
+                await HandleTestAnswerAsync(botClient, message, chatId, sessionInProgress);
                 return;
             }
 
@@ -72,6 +52,7 @@ namespace TelegramMenuBot.Bot
                 await HandleRegistrationAsync(botClient, message, chatId);
                 return;
             }
+
             var titles = await TestService.GetTestTitlesAsync();
 
             if ( titles.Contains(message.Text) )
@@ -87,7 +68,8 @@ namespace TelegramMenuBot.Bot
                     var testSession = new TestSession
                     {
                         Questions = questions,
-                        CurrentQuestionIndex = 0
+                        CurrentQuestionIndex = 0,
+                        CorrectAnswersCount = 0
                     };
 
                     UserTestSessions[chatId] = testSession;
@@ -95,10 +77,61 @@ namespace TelegramMenuBot.Bot
                     await SendCurrentQuestion(botClient, chatId, testSession);
                 }
                 return;
-
             }
 
             await HandleAuthorizedUserAsync(botClient, message, chatId);
+        }
+
+        private static async Task HandleTestAnswerAsync(ITelegramBotClient botClient, Message message, long chatId, TestSession session)
+        {
+            var currentQuestion = session.Questions[session.CurrentQuestionIndex];
+
+            // Вытащить выбранную букву ответа
+            var selectedLetter = message.Text?.Split(':')[0].Trim().ToLower();
+
+            if ( string.IsNullOrEmpty(selectedLetter) )
+            {
+                await botClient.SendMessage(chatId, "⚠️ Неверный формат ответа. Пожалуйста, выберите вариант ответа на клавиатуре.");
+                return;
+            }
+
+            var correctAnswer = currentQuestion.CorrectAnswer.Trim().ToLower();
+
+            if ( selectedLetter == correctAnswer )
+            {
+                session.CorrectAnswersCount++;
+                await botClient.SendMessage(chatId, "✅ Верно!");
+            }
+            else
+            {
+                await botClient.SendMessage(chatId, "❌ Неверно.");
+            }
+
+            session.CurrentQuestionIndex++;
+
+            if ( session.CurrentQuestionIndex < session.Questions.Count )
+            {
+                await SendCurrentQuestion(botClient, chatId, session);
+            }
+            else
+            {
+                await FinishTestAsync(botClient, chatId, session);
+            }
+        }
+
+        private static async Task FinishTestAsync(ITelegramBotClient botClient, long chatId, TestSession session)
+        {
+            int totalQuestions = session.Questions.Count;
+            int correctAnswers = session.CorrectAnswersCount;
+            double percentCorrect = (double)correctAnswers / totalQuestions * 100;
+
+            UserTestSessions.TryRemove(chatId, out _); // Завершили тест
+
+            string resultMessage = $"🏁 *Тест завершен!*\n\n" +
+                                   $"*Правильных ответов:* {correctAnswers} из {totalQuestions}\n" +
+                                   $"*Процент правильных ответов:* {percentCorrect:F1}%";
+
+            await botClient.SendMessage(chatId, resultMessage, parseMode: ParseMode.Markdown, replyMarkup: BotReplyKeyboards.GetMainMenu());
         }
 
         private static async Task HandleRegistrationAsync(ITelegramBotClient botClient, Message message, long chatId)
@@ -158,21 +191,17 @@ namespace TelegramMenuBot.Bot
                     break;
 
                 case "💡 Темы":
+                    var titles = await TestService.GetTestTitlesAsync();
+                    if ( titles.Count == 0 )
                     {
-                        var titles = await TestService.GetTestTitlesAsync();
-
-                        if ( titles.Count == 0 )
-                        {
-                            await botClient.SendMessage(chatId, "❗ Тем пока нет.", replyMarkup: BotReplyKeyboards.GetMainMenu());
-                        }
-                        else
-                        {
-                            var keyboard = BotReplyKeyboards.GetTopicsKeyboard(titles);
-                            await botClient.SendMessage(chatId, "📚 Выберите тему:", replyMarkup: keyboard);
-                        }
-                        break;
+                        await botClient.SendMessage(chatId, "❗ Тем пока нет.", replyMarkup: BotReplyKeyboards.GetMainMenu());
                     }
-
+                    else
+                    {
+                        var keyboard = BotReplyKeyboards.GetTopicsKeyboard(titles);
+                        await botClient.SendMessage(chatId, "📚 Выберите тему:", replyMarkup: keyboard);
+                    }
+                    break;
 
                 case "🛠 Техподдержка":
                     await botClient.SendMessage(chatId, "Свяжитесь с [@SupportUsername](https://t.me/SupportUsername)", parseMode: ParseMode.Markdown, replyMarkup: BotReplyKeyboards.GetMainMenu());
@@ -193,13 +222,13 @@ namespace TelegramMenuBot.Bot
             Console.WriteLine($"Ошибка: {exception.Message}");
             return Task.CompletedTask;
         }
+
         private static async Task SendCurrentQuestion(ITelegramBotClient botClient, long chatId, TestSession session)
         {
             var currentQuestion = session.Questions[session.CurrentQuestionIndex];
 
             string questionText = $"*{currentQuestion.Issue}*";
 
-            // Собираем только непустые варианты
             var choices = new List<string>();
             if ( !string.IsNullOrWhiteSpace(currentQuestion.IssueChoice1) ) choices.Add(currentQuestion.IssueChoice1);
             if ( !string.IsNullOrWhiteSpace(currentQuestion.IssueChoice2) ) choices.Add(currentQuestion.IssueChoice2);
@@ -207,7 +236,7 @@ namespace TelegramMenuBot.Bot
             if ( !string.IsNullOrWhiteSpace(currentQuestion.IssueChoice4) ) choices.Add(currentQuestion.IssueChoice4);
 
             var keyboardButtons = choices
-                .Select(choice => new[] { new KeyboardButton(choice) })
+                .Select((choice, index) => new[] { new KeyboardButton($"{AnswerLetters[index]}: {choice}") })
                 .ToArray();
 
             var keyboard = new ReplyKeyboardMarkup(keyboardButtons)
@@ -218,7 +247,5 @@ namespace TelegramMenuBot.Bot
 
             await botClient.SendMessage(chatId, questionText, parseMode: ParseMode.Markdown, replyMarkup: keyboard);
         }
-
-
     }
 }
