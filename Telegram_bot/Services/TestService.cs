@@ -8,7 +8,7 @@ namespace TelegramMenuBot.Services
     {
         private static readonly HttpClient _httpClient = new()
         {
-            BaseAddress = new Uri("http://localhost:5135/api/v1/")
+            BaseAddress = new Uri("http://prolearn:8080/api/v1/")
         };
 
         public static async Task<List<string>> GetTestTitlesAsync()
