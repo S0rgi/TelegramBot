@@ -1,0 +1,40 @@
+﻿version: '2'
+services:
+  prolearnapi:
+    image: prolearnapi
+    build:
+      context: https://github.com/EgorUgchv/ProLearnDB.git
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    networks:
+      - app-network
+    depends_on:
+      - postgres
+  postgres:
+    image: postgres:16.8
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=mint2024
+      - POSTGRES_DB=ProLearn
+    volumes:
+      - /var/lib/postgresql/data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - app-network
+  telegramBot:
+    image: telegrambot
+    build:
+      context: .
+      dockerfile: Dockerfile
+    tty: true
+    networks:
+      - app-network
+    depends_on:
+      - prolearnapi
+      
+volumes:
+  pg_prolearn:
+networks:
+  app-network:
